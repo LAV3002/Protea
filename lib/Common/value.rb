@@ -1,4 +1,4 @@
-module SimInfra
+module LangInfra
     # Value class is a super class of Variable or Constant.
     class Value
         # If value is nil then Value represents a variable.

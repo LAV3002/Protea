@@ -2,14 +2,41 @@ require_relative 'base'
 require_relative 'var'
 require 'Utility/type'
 
-module SimInfra
+module LangInfra
+    class IrStmt
+        attr_reader :name, :oprnds, :attrs
+        def initialize(name, oprnds, attrs)
+            @name = name; @oprnds = oprnds; @attrs = attrs;
+        end
+
+        def to_h
+            {
+                name: @name,
+                oprnds: @oprnds.map { |o|
+                    if o.class == Var || o.class == Constant
+                        o.to_h
+                    else
+                        o
+                    end
+                },
+                attrs: @attrs,
+            }
+        end
+
+        def self.from_h(h)
+            IrStmt.new(h[:name], h[:oprnds], h[:attrs])
+        end
+    end
+end
+
+module LangInfra
   def assert(condition, msg = nil)
     raise msg unless condition
   end
 
   class Scope
     include GlobalCounter # used for temp variables IDs
-    include SimInfra
+    include LangInfra
 
     attr_reader :tree, :vars, :parent, :mem
 
@@ -27,12 +54,13 @@ module SimInfra
     end
 
     def method(name, type, regset = nil)
-      @vars[name] = SimInfra::Var.new(self, name, type, regset) # return var
+      @vars[name] = LangInfra::Var.new(self, name, type, regset) # return var
       instance_eval "def #{name}(); return @vars[:#{name}]; end", __FILE__, __LINE__
+      @vars[name]
     end
 
     def rmethod(name, regset, type)
-      @vars[name] = SimInfra::Var.new(self, name, type, regset) # return var
+      @vars[name] = LangInfra::Var.new(self, name, type, regset) # return var
       instance_eval "def #{name}(); return @vars[:#{name}]; end", __FILE__, __LINE__
     end
 
@@ -112,6 +140,8 @@ module SimInfra
     end
 
     def cast(expr, type) = stmt(:cast, [tmpvar(type), expr])
+
+    def get_field(expr, lsb, type) = stmt(:get_field, [tmpvar(type), expr, lsb])
 
     def let(*args)
       case args.length

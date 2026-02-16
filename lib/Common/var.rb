@@ -1,9 +1,9 @@
 require_relative 'base'
 require 'Utility/type'
 
-module SimInfra
+module LangInfra
   class Var
-    include SimInfra
+    include LangInfra
     attr_reader :scope, :name, :type, :regset
 
     def initialize(scope, name, type, regset = nil)
@@ -37,7 +37,7 @@ module SimInfra
   end
 end
 
-module SimInfra
+module LangInfra
   #
   class Var
     def +(other) = @scope.add(self, other)

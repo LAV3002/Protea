@@ -9,6 +9,7 @@
 /test/tmp/
 /test/version_tmp/
 /tmp/
+/sim_lib/generated
 
 # Used by dotenv library to load environment variables.
 # .env

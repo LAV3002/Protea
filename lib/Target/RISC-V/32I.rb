@@ -1,10 +1,10 @@
 require_relative "encoding"
-require_relative "../../ADL/base"
+require_relative "../../Common/base"
 require_relative "../../ADL/builder"
 
 module RV32I
-    include SimInfra
-    extend SimInfra
+    include LangInfra
+    extend LangInfra
 
     Interface {
         function :sysCall
