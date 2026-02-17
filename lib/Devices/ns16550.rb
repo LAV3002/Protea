@@ -9,7 +9,7 @@ module Devices
       offset 0x0
       type :ro
       enableIf {
-        let :tmp, :b1, lsr.dlab
+        lsr.dlab
       }
     }
 
@@ -17,13 +17,11 @@ module Devices
       size 0x1
       offset 0x0
       type :wo
-      # enableIf lsr.DLAB == 0
     }
 
     Register(:ier) {
       size 0x1
       offset 0x1
-      # enableIf lsr.DLAB == 0
     }
 
     Register(:iir) {
@@ -67,20 +65,13 @@ module Devices
     Register(:dll) {
       size 0x1
       offset 0x0
-      # enableIf lsr.DLAB == 1
     }
 
     Register(:dlm) {
       size 0x1
       offset 0x1
-      # enableIf lsr.DLAB == 1
     }
 
-    # Function(:lol, int(:lol), bv(64, :dom), void) {
-
-    # }
-    
-    
   }
 
 end

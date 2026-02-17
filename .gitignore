@@ -10,6 +10,8 @@
 /test/version_tmp/
 /tmp/
 /sim_lib/generated
+IR.json
+IR.yaml
 
 # Used by dotenv library to load environment variables.
 # .env

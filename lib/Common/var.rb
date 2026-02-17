@@ -1,9 +1,9 @@
 require_relative 'base'
 require 'Utility/type'
 
-module LangInfra
+module Protea
   class Var
-    include LangInfra
+    include Protea
     attr_reader :scope, :name, :type, :regset
 
     def initialize(scope, name, type, regset = nil)
@@ -37,7 +37,7 @@ module LangInfra
   end
 end
 
-module LangInfra
+module Protea
   #
   class Var
     def +(other) = @scope.add(self, other)

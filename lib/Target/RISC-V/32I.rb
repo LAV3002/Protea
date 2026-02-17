@@ -1,10 +1,10 @@
 require_relative "encoding"
-require_relative "../../Common/base"
-require_relative "../../ADL/builder"
+require "Common/base"
+require "ADL/builder"
 
 module RV32I
-    include LangInfra
-    extend LangInfra
+    include Protea
+    extend Protea
 
     Interface {
         function :sysCall

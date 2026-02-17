@@ -2,7 +2,7 @@ require_relative 'base'
 require_relative 'var'
 require 'Utility/type'
 
-module LangInfra
+module Protea
     class IrStmt
         attr_reader :name, :oprnds, :attrs
         def initialize(name, oprnds, attrs)
@@ -29,14 +29,14 @@ module LangInfra
     end
 end
 
-module LangInfra
+module Protea
   def assert(condition, msg = nil)
     raise msg unless condition
   end
 
   class Scope
     include GlobalCounter # used for temp variables IDs
-    include LangInfra
+    include Protea
 
     attr_reader :tree, :vars, :parent, :mem
 
@@ -54,13 +54,13 @@ module LangInfra
     end
 
     def method(name, type, regset = nil)
-      @vars[name] = LangInfra::Var.new(self, name, type, regset) # return var
+      @vars[name] = Protea::Var.new(self, name, type, regset) # return var
       instance_eval "def #{name}(); return @vars[:#{name}]; end", __FILE__, __LINE__
       @vars[name]
     end
 
     def rmethod(name, regset, type)
-      @vars[name] = LangInfra::Var.new(self, name, type, regset) # return var
+      @vars[name] = Protea::Var.new(self, name, type, regset) # return var
       instance_eval "def #{name}(); return @vars[:#{name}]; end", __FILE__, __LINE__
     end
 

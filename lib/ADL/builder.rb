@@ -1,8 +1,8 @@
-require_relative "../Common/scope"
+require "Common/scope"
 require "Utility/type"
 
 # Basics
-module LangInfra  
+module Protea  
     def assert(condition, msg = nil); raise msg if !condition; end
 
     @@instructions = []
@@ -48,7 +48,7 @@ module LangInfra
     end
 
     class InstructionInfoBuilder
-        include LangInfra
+        include Protea
 
         def initialize(name, feature) 
             @info = InstructionInfo.new(name, feature) 
@@ -100,7 +100,7 @@ module LangInfra
     end
 
     class InterfaceBuilder
-        include LangInfra
+        include Protea
 
         def function(name, output_types = [], input_types = [])
             @@interface_functions << {:name => name, :return_types => output_types, :argument_types => input_types}
@@ -174,7 +174,7 @@ module LangInfra
 end
 
 # * generate precise fields
-module LangInfra
+module Protea
     class RegisterFileBuilder
         def r32(sym, *args)
             @info.regs << Register.new(sym, 32, args[0] ? [args[0]] : [])

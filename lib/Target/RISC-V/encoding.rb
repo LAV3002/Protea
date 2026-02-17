@@ -1,6 +1,6 @@
-require_relative "../../Common/base"
+require "Common/base"
 
-module LangInfra
+module Protea
     def u_imm(imm)
         return imm, :s32, "let :#{imm}, [:op], :s32, f_#{imm}.s << 12"
     end
@@ -30,7 +30,7 @@ module LangInfra
     end
 end
 
-module LangInfra
+module Protea
     def format_u(opcode)
         return :U, [
             field(:f_opcode, 6, 0, opcode),

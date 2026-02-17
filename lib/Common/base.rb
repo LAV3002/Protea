@@ -1,7 +1,7 @@
 require_relative "value"
 # Testing infra
 
-module LangInfra
+module Protea
     # @@instructions -array of instruction description
     # shows result of our tests in interactive Ruby (IRB) or standalone
     def self.serialize(msg= nil)
@@ -44,7 +44,7 @@ module LangInfra
     end
 
     # reset state
-    def LangInfra_reset_module_state; @@instructions = []; end
+    def Protea_reset_module_state; @@instructions = []; end
 
     # mixin for global counter, function returns 0,1,2,....
     module GlobalCounter

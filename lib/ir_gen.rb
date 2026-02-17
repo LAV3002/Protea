@@ -7,10 +7,10 @@ require 'Target/RISC-V/32I'
 
 require 'yaml'
 
-LangInfra.serialize
+Protea.serialize
 
 yaml_data = YAML.safe_load(
-  LangInfra.state,
+  Protea.state,
   permitted_classes: [Symbol],
   symbolize_names: true
 )
