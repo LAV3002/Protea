@@ -191,6 +191,7 @@ module Protea
 
     class InstructionInfoBuilder
         def code(&block)
+            Var.open_scope(Protea::Scope.new(nil))
             if !@info.map_code_blocks.empty?
                 @info.fields.each { |f|
                     @info.map.method(f.value.name, f.value.type)
@@ -208,6 +209,7 @@ module Protea
                 end
             end
             @info.code.instance_eval &block
+            Var.close_scope
         end
 
         def map(blocks)
