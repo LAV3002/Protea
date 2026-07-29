@@ -198,7 +198,9 @@ module Protea
                 }
             end
             @info.map_code_blocks.each do |k, v|
+                Var.open_scope(@info.map)
                 @info.map.instance_eval v[1]
+                Var.close_scope
             end
             @info.map_code_blocks.each do |k, v|
                 @info.code.method(k, v[0], @info.map.vars[k].regset)
@@ -208,7 +210,9 @@ module Protea
                     @info.code.method(reg.name, ('r' + reg.size.to_s).to_sym)
                 end
             end
+            Var.open_scope(@info.code)
             @info.code.instance_eval &block
+            Var.close_scope
             Var.close_scope
         end
 
