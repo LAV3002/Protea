@@ -117,7 +117,7 @@ class PlodFrontendTests < Protea::PlodTestCase
   def test_if_else_scopes
     System::Device(:D) do
       Method(:foo, x: Int()) do
-        If(x.zero?) do
+        If(x == 0) do
           x[] = 1
         end
         Else do
