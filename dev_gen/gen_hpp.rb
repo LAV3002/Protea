@@ -20,6 +20,13 @@ module DevGen
   @tmphash = {}
   @regtypes = {}
 
+  def self.reset
+    @devdesc = nil
+    @self = nil
+    @tmphash = {}
+    @regtypes = {}
+  end
+
   def self.gen_cpp_btype(size)
     return :uint8_t if size <= 8
     return :uint32_t if size <= 32
@@ -507,6 +514,7 @@ module DevGen
   end
 
   def self.gen_header(name, desc, spec)
+    reset
     @devdesc = desc
 
     desc[:registers].map { |name, desc| @regtypes[desc[:type].to_sym] = name }

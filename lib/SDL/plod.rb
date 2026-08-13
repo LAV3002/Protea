@@ -28,6 +28,12 @@ module System
     @semablocks
   end
 
+  def self.reset
+    @desc = { devices: {}, structures: {}, objects: {} }
+    @semablocks = []
+    @gscope = {}
+  end
+
   def self.init_scope(scopes)
     scope = Protea::Scope.new(nil)
 
