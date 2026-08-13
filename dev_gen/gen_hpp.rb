@@ -263,9 +263,9 @@ module DevGen
     end
 
     if (desc[:name] == :call)
-      rettemp = desc[:oprnds][0][:name] 
+      rettemp = desc[:oprnds][0][:name]
       mfname = desc[:oprnds][1]
-      args = desc[:oprnds][2..].map { |op| op[:name] }
+      args = desc[:oprnds][2..].map { |op| gen_op(op) }
 
       stmt = <<~CPP.chomp
         #{rettemp} = #{mfname}(#{args.join(', ')});
@@ -304,8 +304,21 @@ module DevGen
       rhs = desc[:oprnds][1]
 
       if (lhs[:type].match?(/\Arf\d+\z/))
-        field_info = @devdesc[:registers][@self][:fields][lhs[:name]]
-        stmt = "protea::_insert(#{@self}, #{field_info[:lsb]}, #{field_info[:size]}, #{gen_op(rhs)});"
+        if lhs[:name].start_with?('_tmp')
+          stmt = ''
+          @tmphash[lhs[:name]] = gen_op(rhs)
+        else
+          reg_name = @self
+          field_info = @devdesc[:registers][@self][:fields][lhs[:name]]
+          if field_info.nil?
+            owner = @devdesc[:registers].find { |_, rd| rd[:fields].key?(lhs[:name]) }
+            unless owner.nil?
+              reg_name, reg_desc = owner
+              field_info = reg_desc[:fields][lhs[:name]]
+            end
+          end
+          stmt = "protea::_insert(#{reg_name}, #{field_info[:lsb]}, #{field_info[:size]}, #{gen_op(rhs)});"
+        end
       else
         if lhs[:name].start_with?('_tmp')
           stmt = ''
@@ -477,20 +490,29 @@ module DevGen
   end
 
   def self.gen_ctor_init_list(desc)
+    return '' if desc.nil? || desc[:body].nil?
+
     @self = :this
     gen_scope(desc[:body])
     desc[:body][:tree].filter { |sos| sos[:name] == :voidcall && sos[:oprnds][0] == :Init }.map { |sos| "#{sos[:oprnds][1]}(#{sos[:oprnds][2..].map { |oper| gen_op(oper)}.join(', ')})" }.join(', ')
   end
 
   def self.gen_ctor_body(desc)
-    body = desc[:body][:tree].find { |stmt| stmt[:name] == :body }[:oprnds][0]
-    indent(gen_scope(body), 8)
+    return '' if desc.nil? || desc[:body].nil?
+
+    body = desc[:body][:tree].find { |stmt| stmt[:name] == :body }
+    return '' if body.nil?
+
+    indent(gen_scope(body[:oprnds][0]), 8)
   end
 
   def self.gen_header(name, desc, spec)
     @devdesc = desc
 
     desc[:registers].map { |name, desc| @regtypes[desc[:type].to_sym] = name }
+
+    ctor_init_list = gen_ctor_init_list(desc[:ctor])
+    ctor_init_str = ctor_init_list.to_s.empty? ? '' : ", #{ctor_init_list}"
 
     header = <<~CPP
       #pragma once
@@ -573,8 +595,7 @@ module DevGen
       #{indent(gen_methods(desc[:methods]))}
 
           #{name}(const #{name}Params &params)
-            : #{spec.base}(params, params.pio_size),
-            #{gen_ctor_init_list(desc[:ctor])} {
+            : #{spec.base}(params, params.pio_size)#{ctor_init_str} {
       #{gen_ctor_body(desc[:ctor])}
             }
 
@@ -616,28 +637,15 @@ module DevGen
           void unserialize(CheckpointIn &cp) override {}
 
           Port &
-          Clint::getPort(const std::string &if_name, PortID idx)
+          #{name}::getPort(const std::string &if_name, PortID idx)
           {
-              if (if_name == "int_pin")
-                  return signal;
-              else if (if_name == "reset")
-                  return reset;
-              else
-                  return BasicPioDevice::getPort(if_name, idx);
+#{indent(spec.port_body, 8)}
           }
 
           void
-          Clint::init()
+          #{name}::init()
           {
-              reg_init();
-              #{spec.base}::init();
-
-              RiscvSystem *rv_sys = dynamic_cast<RiscvSystem *>(system);
-              if (rv_sys != nullptr) {
-                  rv_sys->setClint(this);
-              } else {
-                  warn("Set Clint to RiscvSystem failed.");
-              }
+#{indent(spec.init_body, 8)}
           }
       };
 

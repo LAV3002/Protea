@@ -21,5 +21,30 @@ module DevGen
     def self.base
       'BasicPioDevice'
     end
+
+    def self.port_body
+      <<~CPP.chomp
+        if (if_name == "int_pin")
+            return signal;
+        else if (if_name == "reset")
+            return reset;
+        else
+            return #{base}::getPort(if_name, idx);
+      CPP
+    end
+
+    def self.init_body
+      <<~CPP.chomp
+        reg_init();
+        #{base}::init();
+
+        RiscvSystem *rv_sys = dynamic_cast<RiscvSystem *>(system);
+        if (rv_sys != nullptr) {
+            rv_sys->setClint(this);
+        } else {
+            warn("Set Clint to RiscvSystem failed.");
+        }
+      CPP
+    end
   end
 end
