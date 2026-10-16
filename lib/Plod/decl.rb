@@ -60,7 +60,7 @@ module Plod
     include Types::BitSugar
     include DeclTypes
 
-    attr_reader :decl, :enable_if_proc, :method_procs
+    attr_reader :decl, :enable_if_proc, :method_procs, :layout_proc, :address_proc
 
     def initialize(frontend, name, props)
       @frontend = frontend
@@ -70,6 +70,7 @@ module Plod
         offset: props[:offset],
         access: self.class.normalize_access(props[:type] || :rw),
         seqn: props[:seqn],
+        window: props[:window],
         fields: [],
         methods: [],
         enable_if: nil,
@@ -102,6 +103,10 @@ module Plod
       @decl.access = self.class.normalize_access(value)
     end
 
+    def Window(value)
+      @decl.window = value
+    end
+
     def Seqn(value)
       @decl.seqn = value
     end
@@ -123,16 +128,31 @@ module Plod
       nil
     end
 
+    def Layout(&block)
+      raise Plod::Error.new('Layout requires a body', Loc.capture) unless block
+      raise Plod::Error.new('Layout cannot be combined with Seqn', Loc.capture) if @decl.seqn
+
+      @decl.layout = []
+      @layout_proc = block
+    end
+
     def EnableIf(&block)
       @enable_if_proc = block
       nil
+    end
+
+    def Address(&block)
+      raise Plod::Error.new('Address requires a body', Loc.capture) unless block
+      raise Plod::Error.new('duplicate Address declaration', Loc.capture) if @address_proc
+
+      @address_proc = block
     end
 
     def Method(name, **args, &block)
       raise Plod::Error.new("register method '#{name}' requires a body", Loc.capture) if block.nil?
 
       args_list, ret_type = process_signature(args, "register method #{name}")
-      if @decl.seqn && args_list.any? { |n, _| n == :cid }
+      if @decl.banked? && args_list.any? { |n, _| n == :cid }
         raise Plod::Error.new(
           "banked register method '#{name}': 'cid' is the implicit bank index; remove the parameter " \
           '(it is available inside the body, and Self denotes the addressed element)', Loc.capture
@@ -168,10 +188,11 @@ module Plod
       raise Plod::Error.new("abstract struct method '#{name}' must not have a body", Loc.capture) if @abstract && block
       raise Plod::Error.new("struct method '#{name}' requires a body", Loc.capture) if !@abstract && block.nil?
 
+      const = args.delete(:Const)
       args_list, ret_type = process_signature(args, "method #{name}")
       decl_method = IR::MethodDecl.new(
         name: name.to_sym, args: args_list, ret_type: ret_type,
-        body: @abstract ? nil : [], abstract: @abstract, loc: Loc.capture
+        body: @abstract ? nil : [], abstract: @abstract, const: const, loc: Loc.capture
       )
       @decl.methods << decl_method
       @method_procs[decl_method] = block if block
@@ -192,7 +213,7 @@ module Plod
     include Types::BitSugar
     include DeclTypes
 
-    attr_reader :decl, :register_ctxs, :method_procs, :lambda_procs, :ctor_proc
+    attr_reader :decl, :register_ctxs, :method_procs, :lambda_procs, :ctor_proc, :checkpoint_proc
 
     def initialize(frontend, name)
       @frontend = frontend
@@ -212,28 +233,39 @@ module Plod
       offset = kwargs.delete(:Offset)
       type = kwargs.delete(:Type) || :rw
       seqn = kwargs.delete(:Seqn)
+      window = kwargs.delete(:Window)
       unless kwargs.empty?
         raise Plod::Error.new(
           "unknown register propert#{kwargs.size == 1 ? 'y' : 'ies'}: " \
-          "#{kwargs.keys.join(', ')} (use Size:, Offset:, Type:, Seqn:)", Loc.capture
+          "#{kwargs.keys.join(', ')} (use Size:, Offset:, Type:, Seqn:, Window:)", Loc.capture
         )
       end
 
-      reg_ctx = RegisterDeclContext.new(@frontend, name, { size: size, offset: offset, type: type, seqn: seqn })
+      reg_ctx = RegisterDeclContext.new(@frontend, name,
+                                        { size: size, offset: offset, type: type, seqn: seqn, window: window })
       reg_ctx.instance_eval(&block) if block
       @decl.registers << reg_ctx.decl
       @register_ctxs << reg_ctx
       nil
     end
 
+    def Checkpoint(&block)
+      raise Plod::Error.new('Checkpoint requires a body', Loc.capture) unless block
+      raise Plod::Error.new('duplicate Checkpoint declaration', Loc.capture) if @checkpoint_proc
+
+      @decl.checkpoint = IR::CheckpointDecl.new(entries: [], loc: Loc.capture)
+      @checkpoint_proc = block
+    end
+
     def Method(name, **args, &block)
       raise Plod::Error.new("device method '#{name}' requires a body", Loc.capture) if block.nil?
 
       check_dup(@decl.methods.map(&:name), name, 'method')
+      const = args.delete(:Const)
       args_list, ret_type = process_signature(args, "device method #{name}")
       decl_method = IR::MethodDecl.new(
         name: name.to_sym, args: args_list, ret_type: ret_type,
-        body: [], abstract: false, loc: Loc.capture
+        body: [], abstract: false, const: const, loc: Loc.capture
       )
       @decl.methods << decl_method
       @method_procs[decl_method] = block

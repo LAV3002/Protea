@@ -1,2 +1,2 @@
 #pragma once
-#include "../gem5_stub.hh"
+#include "x86_stub.hh"

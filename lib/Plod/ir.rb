@@ -40,13 +40,34 @@ module Plod
     EnumDecl = node :name, :values, kind: :enumdecl
     ConstDecl = node :name, :type, :value, kind: :constdecl
     FieldDecl = node :name, :type, :init_args, :abstract, kind: :fielddecl
-    MethodDecl = node :name, :args, :ret_type, :body, :abstract, kind: :methoddecl
+    MethodDecl = node :name, :args, :ret_type, :body, :abstract, :const, kind: :methoddecl
     LambdaDecl = node :name, :args, :body, kind: :lambdadecl
-    RegisterDecl = node :name, :size, :offset, :access, :seqn, :fields, :methods, :enable_if, kind: :registerdecl
+    RegisterDecl = node :name, :size, :offset, :access, :seqn, :fields, :methods, :enable_if, :layout,
+                        :window, :address,
+                        kind: :registerdecl
+    class RegisterDecl
+      def banked? = !!(seqn || layout)
+
+      def storage_type
+        elem = Types::Bits.new(size * 8)
+        return Types::Vector.new(elem) if layout
+
+        seqn ? Types::Array.new(elem, seqn) : elem
+      end
+    end
+
     CtorDecl = node :args, :inits, :body, kind: :ctordecl
-    DeviceDecl = node :name, :registers, :methods, :fields, :enums, :consts, :lambdas, :ctor, kind: :devicedecl
+    CheckpointDecl = node :entries, kind: :checkpointdecl
+    CheckpointValue = node :key, :destination, :encoding, kind: :checkpointvalue
+    CheckpointRepeat = node :iter, :count, :entries, kind: :checkpointrepeat
+    CheckpointMap = node :destination, :key, :count_type, :iter, :key_name, :value_name, :entries, kind: :checkpointmap
+    CheckpointDelegate = node :destination, :prefix, kind: :checkpointdelegate
+    CheckpointInherit = node kind: :checkpointinherit
+    CheckpointHook = node :name, kind: :checkpointhook
+    DeviceDecl = node :name, :registers, :methods, :fields, :enums, :consts, :lambdas, :ctor, :checkpoint,
+                      kind: :devicedecl
     ComponentDecl = node :name, :methods, :fields, :abstract, kind: :componentdecl
-    Program = node :path, :devices, :components, :objects, :functions, kind: :program
+    Program = node :path, :devices, :components, :objects, :functions, :notice, kind: :program
 
     KIND_TO_CLASS = {
       var: VarRef, const: Const, self: SelfRef, selfindex: SelfIndex,
@@ -58,7 +79,10 @@ module Plod
       regfielddecl: RegFieldDecl, enumdecl: EnumDecl, constdecl: ConstDecl,
       fielddecl: FieldDecl, methoddecl: MethodDecl, lambdadecl: LambdaDecl,
       registerdecl: RegisterDecl, ctordecl: CtorDecl,
-      devicedecl: DeviceDecl, componentdecl: ComponentDecl, program: Program
+      devicedecl: DeviceDecl, componentdecl: ComponentDecl, program: Program,
+      checkpointdecl: CheckpointDecl, checkpointvalue: CheckpointValue, checkpointrepeat: CheckpointRepeat,
+      checkpointmap: CheckpointMap, checkpointdelegate: CheckpointDelegate,
+      checkpointinherit: CheckpointInherit, checkpointhook: CheckpointHook
     }.freeze
 
     def self.from_h(h)
@@ -76,7 +100,7 @@ module Plod
       %i[call mcall].include?(node.kind) ? node.ret_type : node.type
     end
 
-    TYPE_MEMBERS = %i[type ret_type].freeze
+    TYPE_MEMBERS = %i[type ret_type count_type].freeze
 
     module Serializable
       def self.included(base)
@@ -118,7 +142,7 @@ module Plod
           if value.is_a?(Hash) && value.key?(:kind)
             Plod::IR.from_h(value)
           elsif value.is_a?(Array)
-            value.map { |v| v.is_a?(Hash) && v.key?(:kind) ? Plod::IR.from_h(v) : v }
+            value.map { |v| deserialize_value(v) }
           elsif value.is_a?(Hash)
             value.transform_keys(&:to_sym)
           else

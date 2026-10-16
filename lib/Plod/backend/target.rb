@@ -1,11 +1,13 @@
 # frozen_string_literal: true
 
 require 'yaml'
+require_relative 'packet_policy'
 
 module Plod
   module Backend
     class Target
-      ATTRS = %i[name devices base ctor_base_args includes forward_decls port_body init_body env].freeze
+      ATTRS = %i[name devices base ctor_base_args includes forward_decls port_body init_body env namespace params_type
+                 inherited_fields declarations public_declarations register_backend preserve_zero_padding packet].freeze
 
       attr_reader(*ATTRS)
 
@@ -29,6 +31,14 @@ module Plod
         target.instance_variable_set(:@port_body, data[:port_body] || "return #{data[:base]}::getPort(if_name, idx);")
         target.instance_variable_set(:@init_body, data[:init_body] || "#{data[:base]}::init();")
         target.instance_variable_set(:@env, data[:env] || {})
+        target.instance_variable_set(:@namespace, data[:namespace] || 'gem5')
+        target.instance_variable_set(:@params_type, data[:params_type])
+        target.instance_variable_set(:@inherited_fields, (data[:inherited_fields] || []).map(&:to_sym))
+        target.instance_variable_set(:@declarations, data[:declarations] || '')
+        target.instance_variable_set(:@public_declarations, data[:public_declarations] || '')
+        target.instance_variable_set(:@register_backend, data[:register_backend] || 'legacy')
+        target.instance_variable_set(:@preserve_zero_padding, data.fetch(:preserve_zero_padding, false))
+        target.instance_variable_set(:@packet, data[:packet].nil? ? nil : PacketPolicy.new(data[:packet]))
         target.validate!(path)
         target
       end
@@ -37,6 +47,12 @@ module Plod
         where = "target #{path || name}"
         raise Plod::Error, "#{where}: 'base' is required" if @base.nil? || @base.empty?
         raise Plod::Error, "#{where}: 'base' must be a string" unless @base.is_a?(String)
+        unless %w[legacy gem5_bank word custom].include?(@register_backend)
+          raise Plod::Error, "#{where}: unknown register_backend '#{@register_backend}'"
+        end
+        return if @namespace.match?(/\A[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*\z/)
+
+        raise Plod::Error, "#{where}: invalid namespace '#{@namespace}'"
       end
 
       def supports_device?(device_name)

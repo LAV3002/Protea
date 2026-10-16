@@ -12,6 +12,8 @@
 #include "dev/reg_bank.hh"
 
 namespace protea {
+    #ifndef PROTEA_PLOD_BIT_HELPERS
+    #define PROTEA_PLOD_BIT_HELPERS
     template <typename BVTD, typename BVTS>
     void _insert(BVTD& dest, uint32_t lsb, uint32_t size, BVTS src) {
         BVTD cleaner = ~((((BVTD)1 << size) - 1) << lsb);
@@ -24,6 +26,7 @@ namespace protea {
     BVT _extract(BVT op, uint32_t lsb, uint32_t size) {
         return (op >> lsb) & (((BVT)1 << size) - 1);
     }
+#endif
 }
 
 namespace gem5 {

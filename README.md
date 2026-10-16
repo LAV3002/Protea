@@ -37,7 +37,21 @@ bundle exec exe/plod targets                            # list backend targets
 `lib/Devices/uart8250.rb` is generated from `uart8250.pld`; edit the `.pld`
 source and re-run `translate` to change it.
 
-See [docs/plod.md](docs/plod.md) for the language reference.
+PLIC and legacy VirtIO MMIO ports are available in `lib/Devices/plic.rb`
+and `lib/Devices/vio_mmio.rb`. They generate `Plic.hh` and `MmioVirtIO.hh`,
+including PLIC timing and checkpoint behavior.
+
+All five x86 `i8*` devices are available as `lib/Devices/i8042.rb`,
+`i82094aa.rb`, `i8237.rb`, `i8254.rb` and `i8259.rb`. They preserve the
+source devices' MMIO, interrupts and checkpoint behavior, and use gem5's
+shared PS/2, PIT and interrupt transport dependencies.
+
+Edit these seven Ruby descriptions directly. Their packet adapters and
+checkpoint methods are generated from register declarations, target packet
+policies and Ruby `Checkpoint` blocks. The existing `.pld` siblings are
+historical snapshots and are not used to regenerate these descriptions.
+
+See [docs/plod.md](docs/plod.md) for the language reference and port commands.
 
 Tests
 -----

@@ -11,7 +11,7 @@ module Plod
     # tokens so the parser can treat them as statement terminators.
     class Lexer
       PUNCT = [
-        '<<=', '>>=', '&&', '||', '<<', '>>', '<=', '>=', '==', '!=',
+        '<<=', '>>=', '++', '&&', '||', '<<', '>>', '<=', '>=', '==', '!=',
         '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=',
         '{', '}', '(', ')', '[', ']', ',', ';', ':', '.', '->',
         '+', '-', '*', '/', '%', '&', '|', '^', '~', '!', '<', '>', '=', '?'
@@ -40,7 +40,7 @@ module Plod
       def lex_token
         rest = @source[@pos..]
         case rest
-        when /\A[ \t\r]+/, %r{\A(?://|\#)[^\n]*} then skip(Regexp.last_match[0])
+        when /\A[ \t\r]+/, %r{\A(?://|\#)[^\n]*}, %r{\A/\*.*?\*/}m then skip(Regexp.last_match[0])
         when /\A\n/ then emit(:nl, nil)
         when /\A(?:0[xX][0-9a-fA-F]+|\d+)/ then emit_int(Regexp.last_match[0])
         when /\A"(\\.|[^"\\])*"/ then emit_string(Regexp.last_match[0])
@@ -61,6 +61,7 @@ module Plod
       def emit(type, text)
         @tokens << [type, text, @line]
         @pos += text.nil? ? 1 : text.length
+        @line += 1 if type == :nl
       end
 
       def emit_int(raw)
