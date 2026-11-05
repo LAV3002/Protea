@@ -17,6 +17,7 @@ class BackendCppTests < Plod::TestCase
     I8042: 'i8042',
     I82094AA: 'i82094aa',
     I8237: 'i8237',
+    I8254: 'i8254',
   }.freeze
 
   def build(device)
