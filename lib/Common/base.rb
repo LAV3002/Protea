@@ -31,6 +31,7 @@ module Protea
     module GlobalCounter
         @@counter = -1
         def next_counter; @@counter += 1; end
+        def self.reset; @@counter = -1; end
     end
 
     class Field
