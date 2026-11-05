@@ -161,6 +161,16 @@ class PlodExtensionTests < Plod::TestCase
     assert_includes error.message, 'broken.pld:3'
   end
 
+  def test_i8042_directional_register_map
+    path = File.join(ROOT, 'lib', 'Devices', 'i8042.rb')
+    fe = Plod::Frontend.load_file(path)
+    assert_empty fe.diag.to_s
+    device = fe.program.devices.first
+    assert_equal [[:output_buffer, 1, 0, :ro], [:input_buffer, 1, 0, :wo],
+                  [:status, 1, 4, :ro], [:command, 1, 4, :wo]],
+                 device.registers.map { |reg| [reg.name, reg.size, reg.offset, reg.access] }
+  end
+
   def test_generic_bank_defaults_and_multidimensional_access
     fe = checked(<<~PLD)
       abstract struct PlicParams { int n_src; }

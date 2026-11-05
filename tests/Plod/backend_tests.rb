@@ -14,6 +14,7 @@ class BackendCppTests < Plod::TestCase
     Uart8250: 'uart8250',
     Plic: 'plic',
     MmioVirtIO: 'vio_mmio',
+    I8042: 'i8042',
   }.freeze
 
   def build(device)
