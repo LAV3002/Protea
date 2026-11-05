@@ -12,6 +12,7 @@ class BackendCppTests < Plod::TestCase
     Clint: 'clint',
     ns16550: 'ns16550',
     Uart8250: 'uart8250',
+    Plic: 'plic',
   }.freeze
 
   def build(device)

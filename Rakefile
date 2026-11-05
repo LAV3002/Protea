@@ -16,6 +16,7 @@ task 'golden:update' do
     'lib/Devices/clint.rb' => :Clint,
     'lib/Devices/ns16550.rb' => :ns16550,
     'lib/Devices/uart8250.rb' => :Uart8250,
+    'lib/Devices/plic.rb' => :Plic,
   }.each do |src, device|
     fe = Plod::Frontend.load_file(src)
     abort "frontend errors in #{src}:\n#{fe.diag}" if fe.diag.error?
