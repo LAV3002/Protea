@@ -243,6 +243,8 @@ module Plod
       return programs.first[1].program if programs.size == 1
 
       merged = Plod::IR::Program.new(path: nil, devices: [], components: [], objects: {}, functions: {})
+      merged.notice = programs.filter_map { |_, fe| fe.program.notice }.uniq.join("\n\n")
+      merged.notice = nil if merged.notice.empty?
       # rubocop:disable Style/HashEachMethods -- programs is an Array of [path, fe] pairs, not a Hash
       programs.each do |_path, fe|
         prog = fe.program

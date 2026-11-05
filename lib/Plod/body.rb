@@ -16,6 +16,10 @@ module Plod
 
     def type = Plod::IR.node_type(@node)
 
+    def coerce(other)
+      [@ctx.value_expr(other), self]
+    end
+
     BINOPS = {
       :+ => :add, :- => :sub, :* => :mul, :/ => :div, :% => :rem,
       :| => :or, :& => :and, :^ => :xor, :<< => :shl, :>> => :shr,
@@ -62,11 +66,7 @@ module Plod
     attr_reader :reg
 
     def initialize(ctx, reg)
-      storage_type = if reg.seqn
-                       Types::Array.new(Types::Bits.new(reg.size * 8), reg.seqn)
-                     else
-                       Types::Bits.new(reg.size * 8)
-                     end
+      storage_type = reg.storage_type
       super(ctx, IR::VarRef.new(name: reg.name, type: storage_type, loc: nil))
       @reg = reg
     end
@@ -331,6 +331,14 @@ module Plod
 
       deref_type = recv_type.deref
 
+      signature = Types.collection_signature(deref_type, name, args.size)
+      if signature
+        arg_exprs = args.map { |a| consume_value(a) }
+        return provisional(IR::MethodCall.new(
+                             recv: recv_node, name: name, args: arg_exprs.map(&:node), ret_type: signature[1], loc: loc
+                           ))
+      end
+
       if deref_type.is_a?(Types::Named)
         component = @frontend.component(deref_type.id)
         if component.nil?
@@ -380,7 +388,9 @@ module Plod
     end
 
     def provisional(node)
+      previous_if = @open_if
       emit(IR::ExprStmt.new(expr: node, loc: node.loc))
+      @open_if = previous_if
       @provisional[node] = @stmts.size - 1
       Expr.new(self, node)
     end
@@ -426,6 +436,10 @@ module Plod
       end
     end
 
+    def Literal(value)
+      value_expr(value)
+    end
+
     def Let(name, type, value)
       expect_type!(type, "variable #{name}")
       v = value_expr(value)
@@ -452,18 +466,18 @@ module Plod
     end
 
     def Elseif(cond, &block)
-      unless @open_if
+      c = value_expr(cond)
+      consume(c)
+      unless @open_if && @stmts.compact.last.equal?(@open_if)
         raise Plod::Error.new('Elseif must directly follow an If (or another Elseif) at the same nesting level', loc)
       end
 
-      c = value_expr(cond)
-      consume(c)
       @open_if.elsif_list << [c.node, sub_body(block).final_stmts]
       nil
     end
 
     def Else(&block)
-      unless @open_if
+      unless @open_if && @stmts.compact.last.equal?(@open_if)
         raise Plod::Error.new('Else must directly follow an If (or Elseif) at the same nesting level', loc)
       end
       raise Plod::Error.new('this If already has an Else', loc) unless @open_if.else_body.nil?
@@ -609,9 +623,20 @@ module Plod
 
     def elem_type(container_node)
       t = Plod::IR.node_type(container_node)
-      return t.elem if t.is_a?(Types::Array)
+      return t.elem if t.is_a?(Types::Array) || t.is_a?(Types::Vector) || t.is_a?(Types::Map)
 
       nil
+    end
+  end
+
+  class LayoutContext < BodyContext
+    def initialize(frontend, env, register)
+      super(frontend, env)
+      @register = register
+    end
+
+    def Repeat(count, stride)
+      @register.layout << [consume_value(count).node, consume_value(stride).node]
     end
   end
 

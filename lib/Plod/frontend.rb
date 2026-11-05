@@ -6,6 +6,7 @@ require_relative 'ir'
 require_relative 'types'
 require_relative 'body'
 require_relative 'decl'
+require_relative 'checkpoint'
 
 module Plod
   class Frontend
@@ -17,6 +18,7 @@ module Plod
       @components = {}
       @file_env = Env.new
       @device_ctors = {}.compare_by_identity
+      @layout_procs = {}.compare_by_identity
     end
 
     def self.load_file(path)
@@ -37,6 +39,8 @@ module Plod
 
     def load_source(source, path)
       @program.path = path
+      notice = source[/^# PLOD source notice begin\n(.*?)^# PLOD source notice end/m, 1]
+      @program.notice = notice.lines.map { |l| l.sub(/^# /, '') }.join.chomp if notice
       file_context = FileContext.new(self)
       safely(path) { file_context.instance_eval(source, path) }
       evaluate_program!
@@ -62,6 +66,10 @@ module Plod
 
     def note_late_bound(note, loc)
       @diag.warning("late-bound call: #{note}", loc)
+    end
+
+    def register_layout_proc(reg, proc)
+      @layout_procs[reg] = proc if proc
     end
 
     def register_component(decl)
@@ -138,6 +146,16 @@ module Plod
       @enable_if_procs[register_decl] = proc
     end
 
+    def register_address_proc(register_decl, proc)
+      @address_procs ||= {}.compare_by_identity
+      @address_procs[register_decl] = proc if proc
+    end
+
+    def register_checkpoint_proc(device, proc)
+      @checkpoint_procs ||= {}.compare_by_identity
+      @checkpoint_procs[device] = proc if proc
+    end
+
     private
 
     def safely(where)
@@ -196,6 +214,11 @@ module Plod
       end
 
       eval_ctor(device, device_env)
+      return unless device.checkpoint
+
+      ctx = CheckpointContext.new(self, Env.new(device_env))
+      safely("checkpoint of #{device.name}") { ctx.focus_eval(&@checkpoint_procs[device]) }
+      device.checkpoint.entries = ctx.final_stmts
     end
 
     def build_device_env(device)
@@ -210,12 +233,19 @@ module Plod
     end
 
     def eval_register(device, device_env, reg)
+      if @address_procs && @address_procs[reg]
+        ctx = BodyContext.new(self, Env.new(device_env))
+        safely("address of #{device.name}.#{reg.name}") do
+          reg.address = ctx.consume_value(ctx.focus_eval(&@address_procs[reg])).node
+          raise Plod::Error, 'Address must be a single expression' unless ctx.final_stmts.empty?
+        end
+      end
+      if @layout_procs[reg]
+        ctx = LayoutContext.new(self, Env.new(device_env), reg)
+        safely("layout of #{device.name}.#{reg.name}") { ctx.focus_eval(&@layout_procs[reg]) }
+      end
       reg_env = Env.new(device_env)
-      storage_type = if reg.seqn
-                       Types::Array.new(Types::Bits.new(reg.size * 8), reg.seqn)
-                     else
-                       Types::Bits.new(reg.size * 8)
-                     end
+      storage_type = reg.storage_type
       self_ref = IR::SelfRef.new(subject: :register, type: storage_type, loc: reg.loc)
       reg.fields.each do |f|
         field_ref = IR::RegFieldRef.new(reg: self_ref, field: f.name, type: Types::Field.new(f.size), loc: f.loc)
@@ -224,10 +254,10 @@ module Plod
       reg.methods.each { |m| reg_env.define(m.name, Binding.new(:regfn, [m])) }
       reg_env.define(:__this__, Binding.new(:self, self_ref))
 
-      banked = reg.seqn ? reg : nil
+      banked = reg.banked? ? reg : nil
       reg.methods.each do |m|
         body_env = Env.new(reg_env)
-        body_env.define(:cid, Binding.new(:var, nil, type: Types::Int.new)) if reg.seqn
+        body_env.define(:cid, Binding.new(:var, nil, type: Types::Int.new)) if reg.banked?
         m.args.each { |n, t| body_env.define(n, Binding.new(:var, nil, type: t)) }
         ctx = BodyContext.new(self, body_env, banked: banked)
         safely("method #{device.name}.#{reg.name}.#{m.name}") { ctx.focus_eval(&method_proc(m)) }
@@ -319,10 +349,13 @@ module Plod
         ctx.register_ctxs.each do |reg_ctx|
           reg_ctx.decl.methods.each { |m| @frontend.register_method_proc(m, reg_ctx.method_procs[m]) }
           @frontend.register_enable_if_proc(reg_ctx.decl, reg_ctx.enable_if_proc)
+          @frontend.register_layout_proc(reg_ctx.decl, reg_ctx.layout_proc)
+          @frontend.register_address_proc(reg_ctx.decl, reg_ctx.address_proc)
         end
         ctx.decl.methods.each { |m| @frontend.register_method_proc(m, ctx.method_procs[m]) }
         ctx.decl.lambdas.each { |l| @frontend.register_lambda_proc(l, ctx.lambda_procs[l]) }
         @frontend.register_ctor_proc(ctx.decl, ctx.ctor_proc)
+        @frontend.register_checkpoint_proc(ctx.decl, ctx.checkpoint_proc)
       end
 
       def register_component_procs(ctx)

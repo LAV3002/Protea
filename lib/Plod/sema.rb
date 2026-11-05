@@ -60,6 +60,7 @@ module Plod
       device.methods.each { |m| check_method(m, nil, device) }
       device.lambdas.each { |l| check_method(l, nil, device) }
       check_ctor(device)
+      check_checkpoint(device)
     end
 
     def check_device_names(device)
@@ -80,6 +81,11 @@ module Plod
     end
 
     def check_register(device, reg)
+      if reg.address
+        ctx = TypeContext.new(self, device_env(device), nil)
+        type = ctx.expr_type(reg.address)
+        error("register #{reg.name}: Address must be numeric", reg) unless type&.numeric?
+      end
       unless reg.size.is_a?(Integer) && reg.size.positive?
         error("register #{reg.name}: size must be a positive integer, got #{reg.size.inspect}",
               reg)
@@ -90,6 +96,24 @@ module Plod
       end
       if reg.seqn && (!reg.seqn.is_a?(Integer) || reg.seqn < 1)
         error("register #{reg.name}: seqn must be a positive integer, got #{reg.seqn.inspect}", reg)
+      end
+
+      if reg.window && (!reg.window.is_a?(Integer) || reg.window < reg.size)
+        error("register #{reg.name}: Window must be an integer at least as large as Size", reg)
+      end
+      if reg.layout
+        error("register #{reg.name}: Layout cannot be combined with Seqn", reg) if reg.seqn
+        error("register #{reg.name}: Layout requires at least one Repeat", reg) if reg.layout.empty?
+        ctx = TypeContext.new(self, device_env(device), nil)
+        reg.layout.each do |count, stride|
+          [count, stride].each do |value|
+            type = ctx.expr_type(value)
+            error('register layout requires numeric counts and strides', value) unless type&.numeric?
+            if value.kind == :const && value.value.is_a?(Integer) && value.value.negative?
+              error('register layout counts and strides cannot be negative', value)
+            end
+          end
+        end
       end
 
       reg.fields.each { |f| check_reg_field(reg, f) }
@@ -155,7 +179,8 @@ module Plod
         device.registers.each do |b|
           next if a.object_id >= b.object_id
           next if (a.access == :ro && b.access == :wo) || (a.access == :wo && b.access == :ro)
-          next if a.enable_if || b.enable_if
+          next if a.enable_if || b.enable_if || a.layout || b.layout
+          next if a.address || b.address
 
           a_lo = a.offset
           a_hi = a.offset + (a.size * (a.seqn || 1))
@@ -171,14 +196,14 @@ module Plod
 
     def check_enum(enum_decl)
       error("enum #{enum_decl.name} has no values", enum_decl) if enum_decl.values.empty?
-      # rubocop:disable Lint/HashEachMethods -- EnumDecl#values is a DTO member (Array), not Hash#values
+      # rubocop:disable Style/HashEachMethods -- EnumDecl#values is a DTO member (Array), not Hash#values
       enum_decl.values.each do |key, value|
         unless value.is_a?(Integer)
           error("enum #{enum_decl.name}.#{key} must be an integer, got #{value.inspect}",
                 enum_decl)
         end
       end
-      # rubocop:enable Lint/HashEachMethods
+      # rubocop:enable Style/HashEachMethods
     end
 
     def check_const(const_decl)
@@ -218,7 +243,10 @@ module Plod
       inited.each do |name, count|
         error("field '#{name}' initialized twice in constructor of #{device.name}", ctor) if count > 1
       end
-      ctor.body.each { |s| check_stmt(s, TypeContext.new(self, device_env(device), nil)) }
+      scope = device_env(device)
+      ctor.args.each { |name, type| scope[name] = [:arg, type] }
+      ctx = TypeContext.new(self, scope, nil)
+      ctor.body.each { |s| check_stmt(s, ctx) }
     end
 
     def check_method(method, component, device, register = nil)
@@ -260,13 +288,9 @@ module Plod
 
     def reg_env(device, reg)
       env = device_env(device)
-      self_ref = if reg.seqn
-                   Types::Array.new(Types::Bits.new(reg.size * 8), reg.seqn)
-                 else
-                   Types::Bits.new(reg.size * 8)
-                 end
+      self_ref = reg.storage_type
       env[:__this__] = [:self, self_ref, :register]
-      env[:cid] = [:var, Types::Int.new] if reg.seqn
+      env[:cid] = [:var, Types::Int.new] if reg.banked?
       reg.fields.each { |f| env[f.name] = [:regfield, Types::Field.new(f.size), [reg, f]] }
       reg.methods.each { |m| env[m.name] = [:regfn, m] }
       env
@@ -321,7 +345,7 @@ module Plod
         ct = ctx.expr_type(container)
         elem_t = elem_type(ct, container, ctx)
         idx_t = ctx.expr_type(stmt.index)
-        error("index must be numeric, got #{idx_t.name}", stmt.index) unless idx_t.nil? || idx_t.numeric?
+        check_index_type(ct, idx_t, stmt.index)
         vt = ctx.expr_type(stmt.value)
         check_compat(vt, elem_t, stmt.value, "element assignment of type #{elem_t&.name || '?'}")
       when :initcall
@@ -331,16 +355,24 @@ module Plod
       end
     end
 
+    def check_index_type(container_type, index_type, node)
+      if container_type.is_a?(Types::Map)
+        check_compat(index_type, container_type.key, node, "map index expects #{container_type.key.name}")
+      elsif index_type && !index_type.numeric?
+        error("index must be numeric, got #{index_type.name}", node)
+      end
+    end
+
     def elem_type(container_type, container, ctx)
       t = container_type
-      return t.elem if t.is_a?(Types::Array)
+      return t.elem if t.is_a?(Types::Array) || t.is_a?(Types::Vector) || t.is_a?(Types::Map)
       if container.is_a?(Struct) && container.respond_to?(:kind) && container.kind == :getelem &&
-         container.container.kind == :self && ctx.register&.seqn
+         container.container.kind == :self && ctx.register&.banked?
         return Types::Bits.new(ctx.register.size * 8)
       end
 
       binding = ctx.lookup(container.name) if container.kind == :var
-      return Types::Bits.new(binding[2].size * 8) if binding && binding[0] == :reg && binding[2].seqn
+      return Types::Bits.new(binding[2].size * 8) if binding && binding[0] == :reg && binding[2].banked?
 
       nil
     end
@@ -381,6 +413,9 @@ module Plod
     end
 
     def type_matches?(actual, expected)
+      actual = actual.deref if actual.ref?
+      expected = expected.deref if expected.ref?
+      return true if expected.is_a?(Types::Auto)
       return true if actual == expected
       return true if actual.is_a?(Types::Named) && expected.is_a?(Types::Named)
       return true if actual.is_a?(Types::Ptr) && expected.is_a?(Types::Ptr)
@@ -454,7 +489,7 @@ module Plod
           case binding[0]
           when :reg
             reg = binding[1]
-            reg.seqn ? Types::Array.new(Types::Bits.new(reg.size * 8), reg.seqn) : Types::Bits.new(reg.size * 8)
+            reg.storage_type
           when :enum
             error("enum '#{node.name}' used as a value", node)
             nil
@@ -520,10 +555,10 @@ module Plod
         when :getelem
           ct = expr_type(node.container)
           idx_t = expr_type(node.index)
-          error("index must be numeric, got #{idx_t.name}", node.index) unless idx_t.nil? || idx_t.numeric?
+          @checker.send(:check_index_type, ct, idx_t, node.index)
           if ct.nil?
             nil
-          elsif ct.is_a?(Types::Array)
+          elsif ct.is_a?(Types::Array) || ct.is_a?(Types::Vector) || ct.is_a?(Types::Map)
             ct.elem
           else
             error("type #{ct.name} is not indexable", node)
@@ -566,7 +601,9 @@ module Plod
         return nil if lt.nil? && rt.nil?
 
         if %i[eq ne lt le gt ge].include?(node.op)
-          if lt && rt && !operand_pair_ok?(lt, rt)
+          null_pair = %i[eq ne].include?(node.op) &&
+                      ((lt&.ptr? && null_literal?(node.rhs)) || (rt&.ptr? && null_literal?(node.lhs)))
+          if lt && rt && !operand_pair_ok?(lt, rt) && !null_pair
             error("cannot compare #{lt.name} with #{rt.name}", node)
             return nil
           end
@@ -593,6 +630,10 @@ module Plod
 
       def numeric_like?(t)
         t.numeric? || t.is_a?(Types::Str) || t.named?
+      end
+
+      def null_literal?(node)
+        node.kind == :const && node.value.is_a?(Integer) && node.value.zero?
       end
 
       def operand_pair_ok?(lt, rt)
@@ -627,18 +668,27 @@ module Plod
 
         target = recv_t.deref
 
+        signature = Types.collection_signature(target, node.name, node.args.size)
+        if signature
+          decl = IR::MethodDecl.new(name: node.name, args: signature[0].each_with_index.map do |t, i|
+            [:"arg#{i}", t]
+          end, ret_type: signature[1])
+          check_call(node, decl)
+          return signature[1]
+        end
+
         method_decl = nil
         index_args = 0
         if node.recv.kind == :self && @register
           method_decl = @register.methods.find { |m| m.name == node.name }
-          index_args = @register.seqn ? 1 : 0
+          index_args = @register.banked? ? 1 : 0
           @register
         elsif node.recv.kind == :var
           binding = lookup(node.recv.name)
           if binding && binding[0] == :reg
             reg = binding[1]
             method_decl = reg.methods.find { |m| m.name == node.name }
-            index_args = reg.seqn ? 1 : 0
+            index_args = reg.banked? ? 1 : 0
           end
         end
         if method_decl.nil? && target.is_a?(Types::Named)
@@ -679,7 +729,7 @@ module Plod
           return nil
         end
 
-        index_args = binding[0] == :regfn && @register&.seqn ? 1 : 0
+        index_args = binding[0] == :regfn && @register&.banked? ? 1 : 0
         check_call(node, binding[1], index_args)
         binding[1].ret_type
       end
@@ -717,3 +767,5 @@ module Plod
     end
   end
 end
+
+require_relative 'checkpoint_sema'

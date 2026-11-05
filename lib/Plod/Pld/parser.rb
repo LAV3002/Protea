@@ -12,7 +12,7 @@ module Plod
     # Blank lines between declarations and statements are recorded (:blank)
     # so the translator can preserve the source's paragraph structure.
     class Parser
-      BUILTIN_TYPES = %w[bool int string auto void].freeze
+      BUILTIN_TYPES = %w[bool int string auto void vector map].freeze
       BUILTIN_RE = /\Ab\d+\z/
 
       PRECEDENCE = {
@@ -25,7 +25,7 @@ module Plod
       ASSIGN_OPS = ['=', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>='].freeze
 
       # -- AST ----------------------------------------------------------------
-      TypeRef = Struct.new(:name, :pointer, :array_size, keyword_init: true)
+      TypeRef = Struct.new(:name, :pointer, :array_size, :reference, :type_args, keyword_init: true)
       Param = Struct.new(:type, :name, keyword_init: true)
       StructDecl = Struct.new(:name, :abstract, :items, :blank, keyword_init: true)
       ObjectDecl = Struct.new(:type, :name, keyword_init: true)
@@ -33,8 +33,11 @@ module Plod
       DeviceDecl = Struct.new(:name, :decls, keyword_init: true)
       EnumDecl = Struct.new(:name, :pairs, :blank, keyword_init: true)
       ConstDecl = Struct.new(:type, :name, :value, :blank, keyword_init: true)
-      MethodDecl = Struct.new(:ret, :name, :args, :body, :abstract, :blank, keyword_init: true)
+      MethodDecl = Struct.new(:ret, :name, :args, :body, :abstract, :const, :blank, keyword_init: true)
       RegisterDecl = Struct.new(:name, :props, :items, :blank, keyword_init: true)
+      ConstructorDecl = Struct.new(:args, :inits, :body, :blank, keyword_init: true)
+      Layout = Struct.new(:dimensions, :blank, keyword_init: true)
+      ForStmt = Struct.new(:iter, :from, :to, :body, :blank, keyword_init: true)
       EnableIf = Struct.new(:expr, :blank, keyword_init: true)
       RegFieldDecl = Struct.new(:name, :lo, :hi, :blank, keyword_init: true)
       FieldDecl = Struct.new(:type, :name, :init, :abstract, :blank, keyword_init: true)
@@ -50,12 +53,14 @@ module Plod
       UnOp = Struct.new(:op, :operand, keyword_init: true)
       Member = Struct.new(:recv, :name, keyword_init: true)
       Call = Struct.new(:target, :args, keyword_init: true)
-      Lambda = Struct.new(:body, keyword_init: true)
+      Lambda = Struct.new(:args, :body, keyword_init: true)
       StaticCast = Struct.new(:type, :expr, keyword_init: true)
       AddrOf = Struct.new(:expr, keyword_init: true)
 
       def self.parse(source, path = '(pld)')
-        new(Lexer.tokenize(source, path), path).parse_program
+        parser = new(Lexer.tokenize(source, path), path)
+        parser.instance_variable_set(:@notice, source[%r{\A\s*(/\*.*?\*/)}m, 1])
+        parser.parse_program
       end
 
       def initialize(tokens, path)
@@ -69,7 +74,7 @@ module Plod
       def parse_program
         decls = []
         decls << parse_toplevel until eof?
-        Struct.new(:decls).new(decls)
+        Struct.new(:decls, :notice).new(decls, @notice)
       end
 
       private
@@ -209,8 +214,9 @@ module Plod
         if accept(:punct, '(')
           args = parse_params
           expect(:punct, ')')
+          const = !!accept(:ident, 'const')
           body = accept(:punct, ';') ? nil : parse_block
-          MethodDecl.new(ret: type, name: name, args: args, body: body, abstract: body.nil?)
+          MethodDecl.new(ret: type, name: name, args: args, body: body, abstract: body.nil?, const: const)
         else
           init = accept(:punct, '=') ? parse_expr : nil
           decl = FieldDecl.new(type: with_array(type, array_size), name: name, init: init, abstract: false)
@@ -231,6 +237,7 @@ module Plod
         when 'enum' then parse_enum
         when 'const' then parse_const
         when 'register' then parse_register
+        when 'constructor' then parse_constructor
         when 'abstract'
           advance
           type = type?(peek) ? parse_type : nil
@@ -247,6 +254,29 @@ module Plod
           decl
         else parse_method_or_field
         end
+      end
+
+      def parse_constructor
+        expect(:ident, 'constructor')
+        expect(:punct, '(')
+        args = parse_params
+        expect(:punct, ')')
+        inits = []
+        if accept(:punct, ':')
+          loop do
+            field = expect(:ident)[1]
+            expect(:punct, '(')
+            values = []
+            until check(:punct, ')')
+              values << parse_expr
+              break unless accept(:punct, ',')
+            end
+            expect(:punct, ')')
+            inits << [field, values]
+            break unless accept(:punct, ',')
+          end
+        end
+        ConstructorDecl.new(args: args, inits: inits, body: parse_block)
       end
 
       def parse_enum
@@ -287,8 +317,9 @@ module Plod
         if accept(:punct, '(')
           args = parse_params
           expect(:punct, ')')
+          const = !!accept(:ident, 'const')
           body = accept(:punct, ';') ? nil : parse_block
-          MethodDecl.new(ret: type, name: name, args: args, body: body, abstract: body.nil?)
+          MethodDecl.new(ret: type, name: name, args: args, body: body, abstract: body.nil?, const: const)
         else
           init = accept(:punct, '=') ? parse_expr : nil
           decl = FieldDecl.new(type: with_array(type, array_size), name: name, init: init, abstract: false)
@@ -326,7 +357,20 @@ module Plod
       end
 
       def parse_register_item
-        if check(:ident, 'enableIf')
+        if check(:ident, 'layout')
+          advance
+          dimensions = parse_braced_items do
+            expect(:ident, 'repeat')
+            expect(:punct, '(')
+            count = parse_expr
+            expect(:punct, ',')
+            stride = parse_expr
+            expect(:punct, ')')
+            end_statement
+            [count, stride]
+          end
+          Layout.new(dimensions: dimensions)
+        elsif check(:ident, 'enableIf')
           advance
           expect(:punct, '{')
           expr = parse_expr
@@ -356,15 +400,28 @@ module Plod
         tok = expect(:ident)
         error("'#{tok[1]}' is not a known type; declare the struct/enum before use") unless type?(tok)
 
+        type_args = []
+        if %w[vector map].include?(tok[1])
+          expect(:punct, '<')
+          type_args << parse_type
+          type_args << parse_type if tok[1] == 'map' && expect(:punct, ',')
+          # The lexer recognizes >> as a shift; split it only in a type.
+          if check(:punct, '>>')
+            idx = raw_index
+            @tokens[idx, 1] = [[:punct, '>', peek[2]], [:punct, '>', peek[2]]]
+          end
+          expect(:punct, '>')
+        end
         pointer = 0
         pointer += 1 while accept(:punct, '*')
-        TypeRef.new(name: tok[1], pointer: pointer, array_size: nil)
+        reference = !accept(:punct, '&').nil?
+        TypeRef.new(name: tok[1], pointer: pointer, array_size: nil, reference: reference, type_args: type_args)
       end
 
       def with_array(type, size)
         return type if size.nil?
 
-        TypeRef.new(name: type.name, pointer: type.pointer, array_size: size)
+        TypeRef.new(**type.to_h, array_size: size)
       end
 
       def parse_array_suffix
@@ -416,6 +473,8 @@ module Plod
         stmt =
           if check(:ident, 'if')
             parse_if
+          elsif check(:ident, 'for')
+            parse_for
           elsif check(:ident, 'return')
             parse_return
           elsif looks_like_var_decl?
@@ -425,6 +484,25 @@ module Plod
           end
         end_statement
         stmt
+      end
+
+      def parse_for
+        expect(:ident, 'for')
+        expect(:punct, '(')
+        expect(:ident, 'int')
+        iter = expect(:ident)[1]
+        expect(:punct, '=')
+        from = parse_expr
+        expect(:punct, ';')
+        expect(:ident, iter)
+        expect(:punct, '<')
+        to = parse_expr
+        expect(:punct, ';')
+        prefix_increment = accept(:punct, '++')
+        expect(:ident, iter)
+        expect(:punct, '++') unless prefix_increment
+        expect(:punct, ')')
+        ForStmt.new(iter: iter, from: from, to: to, body: parse_block)
       end
 
       def parse_var_stmt
@@ -446,7 +524,7 @@ module Plod
       end
 
       def looks_like_var_decl?
-        type?(peek) && peek(1)[0] == :ident && !type?(peek(1))
+        type?(peek) && (%w[vector map].include?(peek[1]) || peek(1)[0] == :ident || %w[* &].include?(peek(1)[1]))
       end
 
       def parse_if
@@ -584,13 +662,18 @@ module Plod
         t3 = @tokens[idx + 2]
         t1 && t1[0] == :punct && t1[1] == '[' &&
           t2 && t2[0] == :punct && t2[1] == ']' &&
-          t3 && t3[0] == :punct && t3[1] == '{'
+          t3 && t3[0] == :punct && %w[{ (].include?(t3[1])
       end
 
       def parse_lambda
         expect(:punct, '[')
         expect(:punct, ']')
-        Lambda.new(body: parse_block)
+        args = []
+        if accept(:punct, '(')
+          args = parse_params
+          expect(:punct, ')')
+        end
+        Lambda.new(args: args, body: parse_block)
       end
     end
   end

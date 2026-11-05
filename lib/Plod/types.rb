@@ -157,6 +157,67 @@ module Plod
       def self.from_h(h) = new(Types.from_h(h[:elem]), h[:size])
     end
 
+    class Vector < Base
+      attr_reader :elem
+
+      def initialize(elem)
+        raise ArgumentError, 'vector element type required' unless elem.is_a?(Base)
+
+        @elem = elem
+      end
+
+      def name = "vector<#{elem.name}>"
+      def array? = true
+      def to_h = { kind: kind, elem: elem.to_h }
+      def self.from_h(h) = new(Types.from_h(h[:elem]))
+    end
+
+    class Map < Base
+      attr_reader :key, :elem
+
+      def initialize(key, elem)
+        raise ArgumentError, 'map key and value types required' unless key.is_a?(Base) && elem.is_a?(Base)
+
+        @key = key
+        @elem = elem
+      end
+
+      def name = "map<#{key.name},#{elem.name}>"
+      def to_h = { kind: kind, key: key.to_h, elem: elem.to_h }
+      def self.from_h(h) = new(Types.from_h(h[:key]), Types.from_h(h[:elem]))
+    end
+
+    # A shared, checked interface for collection calls in the frontend and sema.
+    # Returning nil means the member is not part of the collection interface.
+    def self.collection_signature(type, name, argc)
+      numeric_index = Int.new
+      void = nil
+      collection = type.is_a?(Vector) || type.is_a?(Array) || type.is_a?(Map) || type.is_a?(Str)
+      return nil unless collection
+
+      case name
+      when :size then [[], Int.new]
+      when :empty then [[], Bool.new]
+      when :at
+        key = type.is_a?(Map) ? type.key : numeric_index
+        elem = type.is_a?(Str) ? Bits.new(8) : type.elem
+        [[key], elem]
+      when :resize
+        return nil unless type.is_a?(Vector)
+
+        [argc == 2 ? [numeric_index, type.elem] : [numeric_index], void]
+      when :push
+        type.is_a?(Vector) ? [[type.elem], void] : nil
+      when :clear
+        type.is_a?(Vector) || type.is_a?(Map) ? [[], void] : nil
+      when :put
+        type.is_a?(Map) ? [[type.key, type.elem], void] : nil
+      when :firstKey then type.is_a?(Map) ? [[], type.key] : nil
+      when :firstValue then type.is_a?(Map) ? [[], type.elem] : nil
+      when :eraseFirst then type.is_a?(Map) ? [[], void] : nil
+      end
+    end
+
     module PointerLike
       def ptr? = is_a?(Ptr)
 
@@ -223,7 +284,7 @@ module Plod
 
     CLASSES = {
       int: Int, bool: Bool, str: Str, lambda: Lambda, auto: Auto, void: Void,
-      bits: Bits, field: Field, array: Array, ptr: Ptr, ref: Ref, named: Named
+      bits: Bits, field: Field, array: Array, vector: Vector, map: Map, ptr: Ptr, ref: Ref, named: Named
     }.freeze
 
     def self.from_h(h)
@@ -257,6 +318,10 @@ module Plod
       def Ref(type) = Types::Ref.new(type)
 
       def Array(type, size) = Types::Array.new(type, size)
+
+      def Vector(type) = Types::Vector.new(type)
+
+      def Map(key, elem) = Types::Map.new(key, elem)
     end
 
     MAX_BITS = 4096
