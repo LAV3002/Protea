@@ -26,6 +26,20 @@ class DeclarativeGenerationTests < Plod::TestCase
     }.merge(options))
   end
 
+  def test_all_seven_ports_use_generation
+    %i[Plic MmioVirtIO I8042 I82094AA I8237 I8254 I8259].each do |name|
+      target = TARGETS.for_device(name)
+      file = name == :MmioVirtIO ? 'vio_mmio' : name.to_s.downcase
+      fe = Plod::Frontend.load_file(File.join(ROOT, 'lib', 'Devices', "#{file}.rb"))
+      assert_empty fe.diag.to_s
+      device = fe.program.devices.first
+      refute_nil target.packet
+      refute_nil device.checkpoint
+      assert_empty device.methods.map(&:name) & %i[read write serialize unserialize]
+      assert_equal fe.program.to_h, Plod::IR.from_h(Plod.yaml_load(Plod.yaml_dump(fe.program.to_h))).to_h
+    end
+  end
+
   def test_checkpoint_validation
     cases = {
       "Scalar('x', value); Scalar('x', value)" => 'duplicate checkpoint key',

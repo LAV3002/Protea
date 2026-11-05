@@ -161,6 +161,14 @@ class PlodExtensionTests < Plod::TestCase
     assert_includes error.message, 'broken.pld:3'
   end
 
+  def test_device_ir_roundtrips_with_layouts_and_checkpoints
+    %w[plic vio_mmio i8042 i82094aa i8237 i8254 i8259].each do |file|
+      fe = Plod::Frontend.load_file(File.join(ROOT, 'lib', 'Devices', "#{file}.rb"))
+      assert_empty fe.diag.to_s
+      assert_equal fe.program.to_h, Plod::IR.from_h(Plod.yaml_load(Plod.yaml_dump(fe.program.to_h))).to_h
+    end
+  end
+
   def test_i8042_directional_register_map
     path = File.join(ROOT, 'lib', 'Devices', 'i8042.rb')
     fe = Plod::Frontend.load_file(path)
