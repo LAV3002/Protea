@@ -16,6 +16,7 @@ class BackendCppTests < Plod::TestCase
     MmioVirtIO: 'vio_mmio',
     I8042: 'i8042',
     I82094AA: 'i82094aa',
+    I8237: 'i8237',
   }.freeze
 
   def build(device)
