@@ -320,7 +320,7 @@ module System
   end
 
   def self.Struct(name, &block)
-    struct_builder = StructBuilder
+    struct_builder = StructBuilder.new
     struct_builder.instance_eval(&block)
     @desc[:structures][name] = struct_builder.info
 

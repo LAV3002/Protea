@@ -8,28 +8,28 @@ module System
       size[]= 0
     }
 
-    Method(:push, value: b8) {
+    Method(:push, value: B8()) {
       buf.set((front + size) % buf.plod_type.size, value)
       size[]= size + 1
     }
 
-    Method(:pop, ret: b8) {
-      var :valToRet, b8
+    Method(:pop, ret: B8()) {
+      var :valToRet, B8()
 
       valToRet[]= buf.get(front)
       front[]= (front + 1) % buf.plod_type.size
       size[]= size - 1
-      ret valToRet
+      Return valToRet
     }
 
-    Method(:is_empty, ret: b1) {
-      let :empty, b1, size == 0
-      ret empty
+    Method(:is_empty, ret: B1()) {
+      let :empty, B1(), size == 0
+      Return empty
     }
 
-    Field(:buf, array(b8, 8))
-    Field(:front, int)
-    Field(:size, int)
+    Field(:buf, Array(B8(), 8))
+    Field(:front, Int())
+    Field(:size, Int())
   }
 
   Device(:ns16550) {
@@ -40,7 +40,7 @@ module System
       enableIf { lcr.dlab == 0 }
 
       Method(:read) {
-        let :ret_val, b8, 0
+        let :ret_val, B8(), 0
 
         If(fcr.fe) {
           If(mFifo.is_empty) {
@@ -59,12 +59,12 @@ module System
           }
         }
         Else {
-          ret[]= rbr
+          ret_val[]= rbr
           lsr.dr[]= 0
           lsr.bi[]= 0
         }
 
-        ret ret_val
+        Return ret_val
       }
     }
 
@@ -92,7 +92,7 @@ module System
 
         }
 
-        ret iir
+        Return iir
       }
     }
 
@@ -144,6 +144,6 @@ module System
     }
 
     Field(:mFifo, System.fifo8)
-    Field(:mThrIpending, System.int)
+    Field(:mThrIpending, Int())
   }
 end

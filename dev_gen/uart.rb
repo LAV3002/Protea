@@ -19,5 +19,17 @@ module DevGen
         #include "dev/serial/uart.hh"
       CPP
     end
+
+    def self.base
+      'BasicPioDevice'
+    end
+
+    def self.port_body
+      "return #{base}::getPort(if_name, idx);"
+    end
+
+    def self.init_body
+      "#{base}::init();"
+    end
   end
 end
